@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "template": "cpp-library",
+  "template_version": "0.1.1",
+  "repository_name": "qiven-math",
+  "cmake_project_name": "qiven-math",
+  "cmake_target_name": "qiven-math",
+  "cmake_alias": "qiven::math",
+  "cpp_namespace": "qiven::math",
+  "test_option_name": "QIVEN_MATH_BUILD_TESTS",
+  "vs_solution_name": "qiven-math"
+}

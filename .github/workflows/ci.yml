@@ -1,0 +1,208 @@
+name: CI
+run-name: CI / ${{ inputs.jobs }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: >-
+          Validation units: full, or comma-separated IDs: win-debug, win-release, gcc-debug, gcc-release,
+          clang-debug, clang-release, mac-x64-debug, mac-x64-release, mac-arm64-debug, mac-arm64-release, contracts
+        required: true
+        default: full
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Validation plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      windows: ${{ steps.plan.outputs.windows }}
+      unix: ${{ steps.plan.outputs.unix }}
+      run_windows: ${{ steps.plan.outputs.run_windows }}
+      run_unix: ${{ steps.plan.outputs.run_unix }}
+      run_contracts: ${{ steps.plan.outputs.run_contracts }}
+      selected: ${{ steps.plan.outputs.selected }}
+    steps:
+      - name: Resolve requested validation units
+        id: plan
+        shell: bash
+        env:
+          REQUESTED_JOBS: ${{ inputs.jobs }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          allowed = [
+              "win-debug", "win-release", "gcc-debug", "gcc-release", "clang-debug", "clang-release",
+              "mac-x64-debug", "mac-x64-release", "mac-arm64-debug", "mac-arm64-release", "contracts",
+          ]
+          raw = os.environ["REQUESTED_JOBS"].strip()
+          if raw == "full":
+              selected = allowed
+          else:
+              requested = [item.strip() for item in raw.split(",") if item.strip()]
+              if not requested or "full" in requested:
+                  print("error: jobs must be 'full' or a comma-separated list of validation unit IDs", file=sys.stderr)
+                  sys.exit(1)
+              unknown = sorted(set(requested) - set(allowed))
+              if unknown:
+                  print(f"error: unknown validation unit(s): {', '.join(unknown)}", file=sys.stderr)
+                  sys.exit(1)
+              selected = [item for item in allowed if item in set(requested)]
+          windows = []
+          if "win-debug" in selected:
+              windows.append({"build_type": "Debug"})
+          if "win-release" in selected:
+              windows.append({"build_type": "Release"})
+          definitions = {
+              "gcc-debug": ["Linux GCC x64", "ubuntu-24.04", "gcc", "g++", "Debug"],
+              "gcc-release": ["Linux GCC x64", "ubuntu-24.04", "gcc", "g++", "Release"],
+              "clang-debug": ["Linux Clang x64", "ubuntu-24.04", "clang", "clang++", "Debug"],
+              "clang-release": ["Linux Clang x64", "ubuntu-24.04", "clang", "clang++", "Release"],
+              "mac-x64-debug": ["macOS AppleClang x64", "macos-15-intel", "clang", "clang++", "Debug"],
+              "mac-x64-release": ["macOS AppleClang x64", "macos-15-intel", "clang", "clang++", "Release"],
+              "mac-arm64-debug": ["macOS AppleClang arm64", "macos-15", "clang", "clang++", "Debug"],
+              "mac-arm64-release": ["macOS AppleClang arm64", "macos-15", "clang", "clang++", "Release"],
+          }
+          unix = [
+              {"name": value[0], "os": value[1], "cc": value[2], "cxx": value[3], "build_type": value[4]}
+              for item, value in definitions.items() if item in selected
+          ]
+          outputs = {
+              "windows": json.dumps(windows, separators=(",", ":")),
+              "unix": json.dumps(unix, separators=(",", ":")),
+              "run_windows": str(bool(windows)).lower(),
+              "run_unix": str(bool(unix)).lower(),
+              "run_contracts": str("contracts" in selected).lower(),
+              "selected": ",".join(selected),
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key, value in outputs.items():
+                  print(f"{key}={value}", file=output)
+          PY
+
+  windows:
+    name: Windows MSVC x64 / ${{ matrix.build_type }}
+    needs: plan
+    if: ${{ needs.plan.outputs.run_windows == 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.windows) }}
+    steps:
+      - name: Checkout Math
+        uses: actions/checkout@v6
+        with:
+          path: qiven-math
+      - name: Checkout Foundation
+        uses: actions/checkout@v6
+        with:
+          repository: JasonHuang3D/qiven-foundation
+          ref: f1880847e046425c7f3f3cad22a07d0008aad359
+          path: qiven-foundation
+      - name: Configure
+        run: cmake -S qiven-math -B build -G "Visual Studio 17 2022" -A x64 -DQIVEN_MATH_BUILD_TESTS=ON -DQIVEN_FOUNDATION_ROOT="${{ github.workspace }}/qiven-foundation"
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} --parallel
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.build_type }} --output-on-failure
+
+  unix:
+    name: ${{ matrix.name }} / ${{ matrix.build_type }}
+    needs: plan
+    if: ${{ needs.plan.outputs.run_unix == 'true' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.unix) }}
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - name: Checkout Math
+        uses: actions/checkout@v6
+        with:
+          path: qiven-math
+      - name: Checkout Foundation
+        uses: actions/checkout@v6
+        with:
+          repository: JasonHuang3D/qiven-foundation
+          ref: f1880847e046425c7f3f3cad22a07d0008aad359
+          path: qiven-foundation
+      - name: Configure
+        run: cmake -S qiven-math -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DQIVEN_MATH_BUILD_TESTS=ON -DQIVEN_FOUNDATION_ROOT="${{ github.workspace }}/qiven-foundation"
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  contracts:
+    name: Linux Clang / no exceptions / no RTTI / ASan+UBSan
+    needs: plan
+    if: ${{ needs.plan.outputs.run_contracts == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CC: clang
+      CXX: clang++
+      CXXFLAGS: -fno-exceptions -fno-rtti -fsanitize=address,undefined -fno-omit-frame-pointer
+      LDFLAGS: -fsanitize=address,undefined
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+    steps:
+      - name: Checkout Math
+        uses: actions/checkout@v6
+        with:
+          path: qiven-math
+      - name: Checkout Foundation
+        uses: actions/checkout@v6
+        with:
+          repository: JasonHuang3D/qiven-foundation
+          ref: f1880847e046425c7f3f3cad22a07d0008aad359
+          path: qiven-foundation
+      - name: Configure
+        run: cmake -S qiven-math -B build -DCMAKE_BUILD_TYPE=Debug -DQIVEN_MATH_BUILD_TESTS=ON -DQIVEN_FOUNDATION_ROOT="${{ github.workspace }}/qiven-foundation"
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  ci-gate:
+    name: CI Gate
+    if: ${{ always() }}
+    needs: [plan, windows, unix, contracts]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify requested validation results
+        shell: bash
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          RUN_WINDOWS: ${{ needs.plan.outputs.run_windows }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+          RUN_UNIX: ${{ needs.plan.outputs.run_unix }}
+          UNIX_RESULT: ${{ needs.unix.result }}
+          RUN_CONTRACTS: ${{ needs.plan.outputs.run_contracts }}
+          CONTRACTS_RESULT: ${{ needs.contracts.result }}
+          SELECTED: ${{ needs.plan.outputs.selected }}
+        run: |
+          set -euo pipefail
+          [[ "$PLAN_RESULT" == "success" ]]
+          [[ "$RUN_WINDOWS" != "true" || "$WINDOWS_RESULT" == "success" ]]
+          [[ "$RUN_UNIX" != "true" || "$UNIX_RESULT" == "success" ]]
+          [[ "$RUN_CONTRACTS" != "true" || "$CONTRACTS_RESULT" == "success" ]]
+          echo "Requested validation passed: $SELECTED"
