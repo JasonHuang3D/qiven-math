@@ -28,8 +28,9 @@ if(NOT TARGET qiven::foundation)
         message(FATAL_ERROR "QIVEN_FOUNDATION_ROOT must identify a qiven-foundation source tree")
     endif()
 
-    set(QIVEN_BUILD_TESTS OFF CACHE BOOL "Build Qiven Foundation tests" FORCE)
+    set(QIVEN_BUILD_TESTS OFF)
     add_subdirectory("${_qiven_foundation_source}" "${CMAKE_CURRENT_BINARY_DIR}/qiven-foundation" EXCLUDE_FROM_ALL)
+    unset(QIVEN_BUILD_TESTS)
 endif()
 
 add_library(qiven-math INTERFACE)
