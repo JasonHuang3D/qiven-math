@@ -12,4 +12,21 @@ qiven_math_enable_strong_warnings(qiven-math-smoke)
 
 add_test(NAME qiven-math-smoke COMMAND qiven-math-smoke)
 
-set_target_properties(qiven-math-smoke PROPERTIES FOLDER "Tests")
+add_executable(qiven-math-vector-core vector_core.cpp)
+target_link_libraries(qiven-math-vector-core PRIVATE qiven::math)
+qiven_math_enable_strong_warnings(qiven-math-vector-core)
+add_test(NAME qiven-math-vector-core COMMAND qiven-math-vector-core)
+
+add_library(
+    qiven-math-header-check
+    OBJECT
+        header_check/scalar.cpp
+        header_check/vec2.cpp
+        header_check/vec3.cpp
+        header_check/vec4.cpp
+        header_check/vec.cpp
+)
+target_link_libraries(qiven-math-header-check PRIVATE qiven::math)
+qiven_math_enable_strong_warnings(qiven-math-header-check)
+
+set_target_properties(qiven-math-smoke qiven-math-vector-core qiven-math-header-check PROPERTIES FOLDER "Tests")
