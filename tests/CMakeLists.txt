@@ -17,6 +17,11 @@ target_link_libraries(qiven-math-vector-core PRIVATE qiven::math)
 qiven_math_enable_strong_warnings(qiven-math-vector-core)
 add_test(NAME qiven-math-vector-core COMMAND qiven-math-vector-core)
 
+add_executable(qiven-math-vector-algorithms vector_algorithms.cpp)
+target_link_libraries(qiven-math-vector-algorithms PRIVATE qiven::math)
+qiven_math_enable_strong_warnings(qiven-math-vector-algorithms)
+add_test(NAME qiven-math-vector-algorithms COMMAND qiven-math-vector-algorithms)
+
 add_library(
     qiven-math-header-check
     OBJECT
@@ -24,9 +29,16 @@ add_library(
         header_check/vec2.cpp
         header_check/vec3.cpp
         header_check/vec4.cpp
+        header_check/vec_algorithms.cpp
         header_check/vec.cpp
 )
 target_link_libraries(qiven-math-header-check PRIVATE qiven::math)
 qiven_math_enable_strong_warnings(qiven-math-header-check)
 
-set_target_properties(qiven-math-smoke qiven-math-vector-core qiven-math-header-check PROPERTIES FOLDER "Tests")
+set_target_properties(
+    qiven-math-smoke
+    qiven-math-vector-core
+    qiven-math-vector-algorithms
+    qiven-math-header-check
+    PROPERTIES FOLDER "Tests"
+)
