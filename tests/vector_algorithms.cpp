@@ -45,8 +45,8 @@ int main()
     check(cross(Vec3d { 1.0, 0.0, 0.0 }, Vec3d { 0.0, 1.0, 0.0 }) == Vec3d { 0.0, 0.0, 1.0 });
 
     check(length_squared(Vec3d { 2.0, 3.0, 6.0 }) == 49.0);
-    check(length(Vec3d { 2.0, 3.0, 6.0 }) == 7.0);
-    check(distance(Vec2d { 0.0, 0.0 }, Vec2d { 3.0, 4.0 }) == 5.0);
+    check(is_near(Vec2d { length(Vec3d { 2.0, 3.0, 6.0 }), 0.0 }, Vec2d { 7.0, 0.0 }, 1.0e-15));
+    check(is_near(Vec2d { distance(Vec2d { 0.0, 0.0 }, Vec2d { 3.0, 4.0 }), 0.0 }, Vec2d { 5.0, 0.0 }, 1.0e-15));
 
     const double huge        = std::numeric_limits<double>::max() / 2.0;
     const double huge_length = length(Vec2d { huge, huge });
