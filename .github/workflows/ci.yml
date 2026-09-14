@@ -110,7 +110,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-foundation
-          ref: f1880847e046425c7f3f3cad22a07d0008aad359
+          ref: 6c09151e1a52830c66e6c7a97b5b68740154f475
           path: qiven-foundation
       - name: Configure
         run: cmake -S qiven-math -B build -G "Visual Studio 17 2022" -A x64 -DQIVEN_MATH_BUILD_TESTS=ON -DQIVEN_FOUNDATION_ROOT="${{ github.workspace }}/qiven-foundation"
@@ -141,7 +141,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-foundation
-          ref: f1880847e046425c7f3f3cad22a07d0008aad359
+          ref: 6c09151e1a52830c66e6c7a97b5b68740154f475
           path: qiven-foundation
       - name: Configure
         run: cmake -S qiven-math -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DQIVEN_MATH_BUILD_TESTS=ON -DQIVEN_FOUNDATION_ROOT="${{ github.workspace }}/qiven-foundation"
@@ -172,7 +172,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-foundation
-          ref: f1880847e046425c7f3f3cad22a07d0008aad359
+          ref: 6c09151e1a52830c66e6c7a97b5b68740154f475
           path: qiven-foundation
       - name: Configure
         run: cmake -S qiven-math -B build -DCMAKE_BUILD_TYPE=Debug -DQIVEN_MATH_BUILD_TESTS=ON -DQIVEN_FOUNDATION_ROOT="${{ github.workspace }}/qiven-foundation"
