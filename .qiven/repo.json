@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "template": "cpp-library",
-  "template_version": "0.1.1",
+  "template_version": "0.1.2",
   "repository_name": "qiven-math",
   "cmake_project_name": "qiven-math",
   "cmake_target_name": "qiven-math",
