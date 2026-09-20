@@ -36,6 +36,32 @@ endif()
 add_library(qiven-math INTERFACE)
 add_library(qiven::math ALIAS qiven-math)
 
+set(
+    QIVEN_MATH_PUBLIC_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/math/scalar.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/math/vec.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/math/vec2.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/math/vec3.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/math/vec4.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/math/vec_algorithms.hpp
+)
+
+target_sources(
+    qiven-math
+    INTERFACE
+        FILE_SET HEADERS
+        BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
+        FILES ${QIVEN_MATH_PUBLIC_HEADERS}
+)
+
+if(CMAKE_GENERATOR MATCHES "^Visual Studio")
+    source_group(
+        TREE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        PREFIX "Header Files"
+        FILES ${QIVEN_MATH_PUBLIC_HEADERS}
+    )
+endif()
+
 target_compile_features(qiven-math INTERFACE cxx_std_20)
 target_include_directories(
     qiven-math
