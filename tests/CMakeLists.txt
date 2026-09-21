@@ -1,6 +1,6 @@
 function(qiven_math_enable_strong_warnings target)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
+        target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8 /MP)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
     endif()
