@@ -1,0 +1,44 @@
+{
+ "gate": "local",
+ "head": "f0f2f632ec012fc59e9c573f2fdbea73cb31d7e0",
+ "status": "pass",
+ "tasks": [
+  {
+   "name": "check-toolchain",
+   "status": "pass"
+  },
+  {
+   "name": "format-check",
+   "status": "pass"
+  },
+  {
+   "name": "configure",
+   "status": "pass"
+  },
+  {
+   "name": "build-debug",
+   "status": "pass"
+  },
+  {
+   "name": "build-release",
+   "status": "pass"
+  },
+  {
+   "name": "test-debug",
+   "status": "pass"
+  },
+  {
+   "name": "test-release",
+   "status": "pass"
+  },
+  {
+   "name": "diff-check",
+   "status": "pass"
+  },
+  {
+   "name": "clean-tree",
+   "status": "pass"
+  }
+ ],
+ "timestamp": "2026-09-21T22:26:29Z"
+}
