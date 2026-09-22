@@ -33,3 +33,6 @@ compile_commands.json
 # python bytecode
 __pycache__/
 *.pyc
+
+# Generated artifacts (ADR-0042: .generated-temp is the only permitted location)
+.generated-temp/
