@@ -52,11 +52,22 @@ jobs:
           else:
               requested = [item.strip() for item in raw.split(",") if item.strip()]
               if not requested or "full" in requested:
-                  print("error: jobs must be 'full' or a comma-separated list of validation unit IDs", file=sys.stderr)
+                  print("error: jobs must be 'full' or a comma-separated list of validation unit IDs "
+                        "(allowed: " + ", ".join(allowed) + ")", file=sys.stderr)
+                  print("error: WHY: the plan is the typed admission surface - an unrecognized "
+                        "request would validate nothing while appearing to run CI "
+                        "(rule: math/ci-plan)", file=sys.stderr)
+                  print("error: NEXT action: FIX - re-dispatch with jobs=full or a subset of: "
+                        + ", ".join(allowed), file=sys.stderr)
                   sys.exit(1)
               unknown = sorted(set(requested) - set(allowed))
               if unknown:
-                  print(f"error: unknown validation unit(s): {', '.join(unknown)}", file=sys.stderr)
+                  print(f"error: unknown validation unit(s): {', '.join(unknown)} "
+                        "(allowed: " + ", ".join(allowed) + ")", file=sys.stderr)
+                  print("error: WHY: an unknown unit name cannot map to any matrix leg; "
+                        "the run would be vacuous (rule: math/ci-plan)", file=sys.stderr)
+                  print("error: NEXT action: FIX - correct the unit name from: "
+                        + ", ".join(allowed) + ", then re-dispatch", file=sys.stderr)
                   sys.exit(1)
               selected = [item for item in allowed if item in set(requested)]
           windows = []
@@ -209,8 +220,20 @@ jobs:
           SELECTED: ${{ needs.plan.outputs.selected }}
         run: |
           set -euo pipefail
-          [[ "$PLAN_RESULT" == "success" ]]
-          [[ "$RUN_WINDOWS" != "true" || "$WINDOWS_RESULT" == "success" ]]
-          [[ "$RUN_UNIX" != "true" || "$UNIX_RESULT" == "success" ]]
-          [[ "$RUN_CONTRACTS" != "true" || "$CONTRACTS_RESULT" == "success" ]]
+          ok=0
+          [[ "$PLAN_RESULT" == "success" ]] || ok=1
+          [[ "$RUN_WINDOWS" != "true" || "$WINDOWS_RESULT" == "success" ]] || ok=1
+          [[ "$RUN_UNIX" != "true" || "$UNIX_RESULT" == "success" ]] || ok=1
+          [[ "$RUN_CONTRACTS" != "true" || "$CONTRACTS_RESULT" == "success" ]] || ok=1
+          if [[ "$ok" != "0" ]]; then
+            echo "[FAIL] CI Gate: WHY: a requested validation unit did not succeed"
+            echo "  (rule: math/ci-gate - the conclusion is the enforcement; the unix"
+            echo "  and contracts units are honest typed [SKIP]s until per-platform"
+            echo "  presets land - a skip validates nothing and is never a pass)"
+            echo "  NEXT action: DIAGNOSE - open the failed unit's step logs, classify"
+            echo "  the failure (plan admission, configure, build, test), fix it at"
+            echo "  the pinned workspace revisions, then re-dispatch; a re-dispatch"
+            echo "  without a fix is not a retry."
+            exit 1
+          fi
           echo "Requested validation passed: $SELECTED"
