@@ -1,6 +1,15 @@
 name: CI
 run-name: CI / ${{ inputs.jobs }}
 
+# 2026-10-03 adjudicated design (cancel CI dependency pins): the
+# landing-date node pins (workspace, devkit, foundation, math) are
+# REMOVED. Every dispatch names its own candidate (required, full
+# 40-hex-char SHA of this repo's commit under test) and an optional
+# workspace_ref for deliberate old-graph reproduction (absent =
+# workspace default branch head). The resolve job reads
+# workspace.lock.json at that workspace ref and every node checkout
+# rides the resolved lock SHAs; no node pins live in this file.
+
 on:
   workflow_dispatch:
     inputs:
@@ -11,6 +20,17 @@ on:
         required: true
         default: full
         type: string
+      candidate:
+        description: >-
+          Full 40-hex-char SHA of the qiven-math commit under test
+        required: true
+        type: string
+      workspace_ref:
+        description: >-
+          Optional qiven-workspace ref for deliberate old-graph reproduction;
+          absent = workspace default branch head
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -20,6 +40,132 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve:
+    name: Resolve run graph (candidate + workspace lock)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      candidate: ${{ steps.candidate.outputs.candidate }}
+      workspace_commit: ${{ steps.identity.outputs.workspace_commit }}
+      devkit_sha: ${{ steps.lock.outputs.devkit_sha }}
+      foundation_sha: ${{ steps.lock.outputs.foundation_sha }}
+    steps:
+      - name: Validate candidate admission (typed)
+        id: candidate
+        shell: bash
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CANDIDATE" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "[FAIL] resolve/candidate: WHAT: the candidate input is malformed"
+            echo "  or missing - it must be the exact full 40-hex-char SHA of the"
+            echo "  qiven-math commit under test"
+            echo "  WHY: a dispatch must name the exact head under test; a silent"
+            echo "  branch-head fallback would validate an unstated graph - the"
+            echo "  defect class this redesign eliminates (rule: math/ci-resolve)"
+            echo "  EVIDENCE: received candidate input string: \"$CANDIDATE\""
+            echo "  NEXT action: FIX - re-dispatch with the full 40-char SHA of the"
+            echo "  intended head; this workflow never falls back to a branch head"
+            exit 1
+          fi
+          echo "candidate=${CANDIDATE,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout workspace control (dispatch ref or default)
+        uses: actions/checkout@v6
+        with:
+          repository: JasonHuang3D/qiven-workspace
+          ref: ${{ inputs.workspace_ref }}
+          path: qiven-workspace
+
+      - name: Resolve dependency graph from the workspace lock
+        id: lock
+        shell: bash
+        env:
+          LOCK_NODE_MAP: qiven-devkit=devkit_sha qiven-foundation=foundation_sha
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          lock_path = "qiven-workspace/workspace.lock.json"
+          try:
+              with open(lock_path, encoding="utf-8") as handle:
+                  lock = json.load(handle)
+          except Exception as error:
+              print(f"error: WHAT: cannot read the workspace lock at {lock_path}:"
+                f" {error}", file=sys.stderr)
+              print("error: WHY: the dispatch graph is resolved from the lock;"
+                " an unreadable lock has no fallback (rule: math/ci-resolve)",
+                file=sys.stderr)
+              print(f"error: EVIDENCE: {type(error).__name__}: {error}", file=sys.stderr)
+              print("error: NEXT action: DIAGNOSE - inspect the dispatched"
+                " workspace ref (rule: math/ci-resolve)", file=sys.stderr)
+              sys.exit(1)
+          if lock.get("schema") != "qiven-workspace-lock-v1":
+              print("error: WHAT: unsupported lock schema", file=sys.stderr)
+              print("error: WHY: the resolver reads only the admitted"
+                " qiven-workspace-lock-v1 shape; schema drift is a typed"
+                " stop, never a best-effort parse (rule: math/ci-resolve)",
+                file=sys.stderr)
+              print("error: EVIDENCE: schema=" + repr(lock.get("schema")),
+                file=sys.stderr)
+              print("error: NEXT action: DIAGNOSE - inspect the dispatched"
+                " workspace ref (rule: math/ci-resolve)", file=sys.stderr)
+              sys.exit(1)
+          pairs = [item.split("=", 1) for item in os.environ["LOCK_NODE_MAP"].split()]
+          resolved = {}
+          unresolved = []
+          evidence = []
+          for node, key in pairs:
+              commit = lock.get("nodes", {}).get(node, {}).get("commit")
+              if commit and re.fullmatch(r"[0-9a-f]{40}", commit):
+                  resolved[key] = commit
+              else:
+                  unresolved.append(node)
+                  evidence.append(f"{node}={commit!r}")
+          if unresolved:
+              print("error: WHAT: the lock does not resolve node(s): "
+                  + ", ".join(sorted(unresolved)), file=sys.stderr)
+              print("error: WHY: the dispatch graph must be fully stated by the"
+                  " lock; an unresolved node has no fallback"
+                  " (rule: math/ci-resolve)", file=sys.stderr)
+              print("error: EVIDENCE: workspace.lock.json node entries: "
+                  + ", ".join(sorted(evidence)), file=sys.stderr)
+              print("error: NEXT action: DIAGNOSE - inspect workspace.lock.json"
+                  " at the dispatched workspace ref", file=sys.stderr)
+              sys.exit(1)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key, sha in resolved.items():
+                  print(f"{key}={sha}", file=output)
+          PY
+
+      - name: Record run identity (this echo is the record)
+        id: identity
+        shell: bash
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.candidate }}
+          WORKSPACE_REF: ${{ inputs.workspace_ref }}
+          DEVKIT_SHA: ${{ steps.lock.outputs.devkit_sha }}
+          FOUNDATION_SHA: ${{ steps.lock.outputs.foundation_sha }}
+        run: |
+          set -euo pipefail
+          workspace_commit="$(git -C qiven-workspace rev-parse HEAD)"
+          if [[ -z "$WORKSPACE_REF" ]]; then
+            workspace_ref_used="default"
+          else
+            workspace_ref_used="$WORKSPACE_REF"
+          fi
+          echo "run identity (record):"
+          echo "  candidate: $CANDIDATE"
+          echo "  workspace_ref used: $workspace_ref_used"
+          echo "  workspace commit (lock source): $workspace_commit"
+          echo "  dependency graph (node -> resolved SHA):"
+          echo "    qiven-devkit -> $DEVKIT_SHA"
+          echo "    qiven-foundation -> $FOUNDATION_SHA"
+          echo "workspace_commit=$workspace_commit" >> "$GITHUB_OUTPUT"
+
   plan:
     name: Validation plan
     runs-on: ubuntu-24.04
@@ -52,20 +198,29 @@ jobs:
           else:
               requested = [item.strip() for item in raw.split(",") if item.strip()]
               if not requested or "full" in requested:
-                  print("error: jobs must be 'full' or a comma-separated list of validation unit IDs "
-                        "(allowed: " + ", ".join(allowed) + ")", file=sys.stderr)
-                  print("error: WHY: the plan is the typed admission surface - an unrecognized "
-                        "request would validate nothing while appearing to run CI "
-                        "(rule: math/ci-plan)", file=sys.stderr)
-                  print("error: NEXT action: FIX - re-dispatch with jobs=full or a subset of: "
-                        + ", ".join(allowed), file=sys.stderr)
+                  print("error: WHAT: the jobs input is malformed - it must be "
+                        "'full' or a comma-separated list of validation unit "
+                        "IDs (allowed: " + ", ".join(allowed) + ")",
+                        file=sys.stderr)
+                  print("error: WHY: the plan is the typed admission surface - an "
+                        "unrecognized request would validate nothing while appearing "
+                        "to run CI (rule: math/ci-plan)", file=sys.stderr)
+                  print("error: EVIDENCE: received jobs input string: "
+                        + repr(os.environ["REQUESTED_JOBS"]), file=sys.stderr)
+                  print("error: NEXT action: FIX - re-dispatch with jobs=full or a "
+                        "subset of: " + ", ".join(allowed), file=sys.stderr)
                   sys.exit(1)
               unknown = sorted(set(requested) - set(allowed))
               if unknown:
-                  print(f"error: unknown validation unit(s): {', '.join(unknown)} "
-                        "(allowed: " + ", ".join(allowed) + ")", file=sys.stderr)
-                  print("error: WHY: an unknown unit name cannot map to any matrix leg; "
-                        "the run would be vacuous (rule: math/ci-plan)", file=sys.stderr)
+                  print("error: WHAT: unknown validation unit(s): "
+                        + ", ".join(unknown) + " (allowed: "
+                        + ", ".join(allowed) + ")", file=sys.stderr)
+                  print("error: WHY: an unknown unit name cannot map to any matrix "
+                        "leg; the run would be vacuous (rule: math/ci-plan)",
+                        file=sys.stderr)
+                  print("error: EVIDENCE: received jobs input string: "
+                        + repr(os.environ["REQUESTED_JOBS"]) + "; unknown "
+                        "token(s): " + ", ".join(unknown), file=sys.stderr)
                   print("error: NEXT action: FIX - correct the unit name from: "
                         + ", ".join(allowed) + ", then re-dispatch", file=sys.stderr)
                   sys.exit(1)
@@ -104,7 +259,7 @@ jobs:
 
   windows:
     name: Windows MSVC x64 / ${{ matrix.build_type }}
-    needs: plan
+    needs: [plan, resolve]
     if: ${{ needs.plan.outputs.run_windows == 'true' }}
     runs-on: windows-2022
     timeout-minutes: 15
@@ -113,35 +268,36 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.windows) }}
     steps:
-      # WR-3 continuation (v29): the raw cmake entry (stale QIVEN_FOUNDATION_ROOT
-      # pin, dead since the WR-3 cutover) is replaced by the workspace path. CI
-      # validates the LOCKED workspace graph: the control repository is pinned
-      # to the admitted revision and every node checkout rides the lock; runs
-      # are dispatched after a lock transaction advances (explicit-dispatch
-      # law). The replacement proof is an owner-dispatched run.
-      - name: Checkout workspace control (pinned admitted revision)
+      # CI validates the DISPATCH-STATED graph (2026-10-03 pin
+      # cancellation): the control repository rides the resolve job's
+      # lock read, the candidate is the dispatch input, and every
+      # dependency node checkout rides the SHAs resolved from
+      # workspace.lock.json. No node pins live in this file. The
+      # workspace-path migration itself is WR-3 continuation (v29);
+      # per-platform presets remain a WR-5-class follow-up.
+      - name: Checkout workspace control (lock-read revision)
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-workspace
-          ref: 423082d428602abc7c21fd1af35652242d4e3cbd
+          ref: ${{ needs.resolve.outputs.workspace_commit }}
           path: qiven-workspace
       - name: Checkout locked Devkit
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-devkit
-          ref: 945fdd2b399d6701ba2eab79688a730c009e835f
+          ref: ${{ needs.resolve.outputs.devkit_sha }}
           path: qiven-devkit
       - name: Checkout locked Foundation
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-foundation
-          ref: 9045feee0c81fa247dec49407e51e891fe427744
+          ref: ${{ needs.resolve.outputs.foundation_sha }}
           path: qiven-foundation
-      - name: Checkout locked Math
+      - name: Checkout math candidate (dispatch)
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-math
-          ref: bfea3bd40e5fa32c76fd1082394b8750f57659fb
+          ref: ${{ needs.resolve.outputs.candidate }}
           path: qiven-math
       - name: Configure (workspace bootstrap)
         run: >-
@@ -156,7 +312,7 @@ jobs:
 
   unix:
     name: ${{ matrix.name }} / ${{ matrix.build_type }}
-    needs: plan
+    needs: [plan, resolve]
     if: ${{ needs.plan.outputs.run_unix == 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -179,7 +335,7 @@ jobs:
 
   contracts:
     name: Linux Clang / no exceptions / no RTTI / ASan+UBSan
-    needs: plan
+    needs: [plan, resolve]
     if: ${{ needs.plan.outputs.run_contracts == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -203,13 +359,14 @@ jobs:
   ci-gate:
     name: CI Gate
     if: ${{ always() }}
-    needs: [plan, windows, unix, contracts]
+    needs: [resolve, plan, windows, unix, contracts]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Verify requested validation results
         shell: bash
         env:
+          RESOLVE_RESULT: ${{ needs.resolve.result }}
           PLAN_RESULT: ${{ needs.plan.result }}
           RUN_WINDOWS: ${{ needs.plan.outputs.run_windows }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
@@ -221,18 +378,22 @@ jobs:
         run: |
           set -euo pipefail
           ok=0
+          [[ "$RESOLVE_RESULT" == "success" ]] || ok=1
           [[ "$PLAN_RESULT" == "success" ]] || ok=1
           [[ "$RUN_WINDOWS" != "true" || "$WINDOWS_RESULT" == "success" ]] || ok=1
           [[ "$RUN_UNIX" != "true" || "$UNIX_RESULT" == "success" ]] || ok=1
           [[ "$RUN_CONTRACTS" != "true" || "$CONTRACTS_RESULT" == "success" ]] || ok=1
           if [[ "$ok" != "0" ]]; then
-            echo "[FAIL] CI Gate: WHY: a requested validation unit did not succeed"
-            echo "  (rule: math/ci-gate - the conclusion is the enforcement; the unix"
-            echo "  and contracts units are honest typed [SKIP]s until per-platform"
-            echo "  presets land - a skip validates nothing and is never a pass)"
+            echo "[FAIL] CI Gate: WHAT: a requested validation unit did not succeed"
+            echo "  WHY: the conclusion is the enforcement; the unix and contracts"
+            echo "  units are honest typed [SKIP]s until per-platform presets land -"
+            echo "  a skip validates nothing and is never a pass (rule: math/ci-gate)"
+            echo "  EVIDENCE: resolve=${RESOLVE_RESULT}, plan=${PLAN_RESULT},"
+            echo "  windows=${WINDOWS_RESULT}, unix=${UNIX_RESULT},"
+            echo "  contracts=${CONTRACTS_RESULT}; requested units: ${SELECTED}"
             echo "  NEXT action: DIAGNOSE - open the failed unit's step logs, classify"
-            echo "  the failure (plan admission, configure, build, test), fix it at"
-            echo "  the pinned workspace revisions, then re-dispatch; a re-dispatch"
+            echo "  the failure (resolve/plan admission, configure, build, test), fix"
+            echo "  it at the validated revisions, then re-dispatch; a re-dispatch"
             echo "  without a fix is not a retry."
             exit 1
           fi
